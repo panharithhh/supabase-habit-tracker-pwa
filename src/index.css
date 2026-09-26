@@ -1,3 +1,10 @@
+/* Tailwind's theme and utilities (grid-cols-*, sm:, lg:, hidden) without its
+   preflight reset, so the hand-written styles below keep working. Utilities
+   sit in a layer, so they never override an unlayered rule here. */
+@layer theme, base, components, utilities;
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
 :root {
   --bg: #f6f5f2;
   --surface: #ffffff;
@@ -10,7 +17,10 @@
   --danger: #b3261e;
   --danger-soft: #fbe9e7;
   --notice-soft: #e8f0fb;
+  --warn-soft: #fdf1cf;
+  --warn-text: #5b4300;
   --radius: 10px;
+  --gutter: 16px;
 
   color-scheme: light dark;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -32,6 +42,8 @@
     --danger: #f2877e;
     --danger-soft: #3a1f1c;
     --notice-soft: #1c2738;
+    --warn-soft: #3a2f10;
+    --warn-text: #f3d98b;
   }
 }
 
@@ -44,10 +56,16 @@ body {
   background: var(--bg);
 }
 
+/* Mobile first: phone sizes are the default, wider screens add to them. The
+   side padding respects the notch when the installed app runs full screen. */
 main {
   max-width: 600px;
   margin: 0 auto;
-  padding: 32px 16px 64px;
+  padding: 20px max(var(--gutter), env(safe-area-inset-right)) 96px max(var(--gutter), env(safe-area-inset-left));
+}
+
+main.dashboard {
+  max-width: 1120px;
 }
 
 main.narrow {
@@ -55,9 +73,21 @@ main.narrow {
   padding-top: 12vh;
 }
 
+@media (min-width: 640px) {
+  main {
+    padding-top: 32px;
+  }
+}
+
 h1 {
-  font-size: 1.6rem;
+  font-size: 1.35rem;
   margin: 0 0 16px;
+}
+
+@media (min-width: 640px) {
+  h1 {
+    font-size: 1.6rem;
+  }
 }
 
 h2 {
@@ -150,7 +180,7 @@ button.ghost {
   border-color: var(--border);
   color: var(--text);
   font-weight: 500;
-  padding: 6px 12px;
+  padding: 6px 10px;
 }
 
 button.ghost.danger {
@@ -225,7 +255,8 @@ button.ghost.danger:hover {
   min-width: 0;
 }
 
-.who span {
+.who .email {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -234,6 +265,11 @@ button.ghost.danger:hover {
 .add {
   display: flex;
   gap: 8px;
+}
+
+/* A flex item won't shrink below its content by default; an input's is ~20 characters. */
+.add input {
+  min-width: 0;
 }
 
 .empty {
@@ -252,6 +288,21 @@ button.ghost.danger:hover {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-width: 0;
+}
+
+.habit.queued {
+  border-style: dashed;
+}
+
+.pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--notice-soft);
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 600;
 }
 
 .habit-head {
@@ -287,7 +338,12 @@ button.ghost.danger:hover {
 .day .dow {
   font-size: 0.7rem;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
+}
+
+.day.today .dow {
+  color: var(--accent);
+  font-weight: 700;
 }
 
 .day .num {
@@ -306,7 +362,8 @@ button.ghost.danger:hover {
   color: var(--accent-text);
 }
 
-.day.done .num {
+.day.done .num,
+.day.done.today .dow {
   color: var(--accent-text);
 }
 
@@ -505,4 +562,94 @@ button.ghost.danger:hover {
 .fallback-actions {
   display: flex;
   gap: 8px;
+}
+
+/* Offline banner */
+
+.net-banner {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding: 8px max(var(--gutter), env(safe-area-inset-right)) 8px max(var(--gutter), env(safe-area-inset-left));
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.net-banner.offline {
+  background: var(--warn-soft);
+  color: var(--warn-text);
+}
+
+.net-banner.back {
+  background: var(--accent-soft);
+}
+
+/* Toasts (install, update) and the share status: pinned to the bottom, full
+   width on a phone, a card in the corner on anything wider. */
+
+.toasts,
+.share-status {
+  position: fixed;
+  z-index: 20;
+  left: var(--gutter);
+  right: var(--gutter);
+  bottom: max(var(--gutter), env(safe-area-inset-bottom));
+}
+
+.toasts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast,
+.share-status {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.16);
+}
+
+.toast {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+  pointer-events: auto;
+}
+
+.toast p {
+  display: flex;
+  flex: 1 1 180px;
+  flex-direction: column;
+  font-size: 0.9rem;
+}
+
+.toast.install img {
+  flex: none;
+  border-radius: 9px;
+}
+
+.toast-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.share-status {
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 640px) {
+  .toasts,
+  .share-status {
+    left: auto;
+    right: 24px;
+    bottom: 24px;
+    width: 400px;
+  }
 }
