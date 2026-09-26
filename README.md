@@ -151,6 +151,11 @@ were run back to back, twice; both runs gave identical scores.
 | Mobile, after | **99** | **100** | **100** | **100** |
 | Desktop, before | 100 | 100 | 96 | 82 |
 | Desktop, after | **100** | **100** | **100** | **100** |
+| Live on GitHub Pages (HTTPS), mobile | 98 | 100 | 100 | 100 |
+| Live on GitHub Pages (HTTPS), desktop | 100 | 100 | 100 | 100 |
+
+The live mobile run includes real network latency to the CDN, which the local
+runs don't.
 
 What the fixes were:
 
