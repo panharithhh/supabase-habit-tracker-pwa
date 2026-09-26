@@ -1,215 +1,220 @@
-# Habit Tracker: avatar uploads + error boundaries
+# Habit Tracker: installable, offline-first PWA
 
-A React 19 + TypeScript (Vite) habit tracker on Supabase. This step adds two
-things that make the app hold up against bad input and broken code:
+A React 19 + TypeScript (Vite) habit tracker on Supabase, now a Progressive Web
+App: it installs to a phone's home screen, opens on a train with no signal,
+queues habits you add offline and syncs them when you reconnect, fits a 320 px
+screen without sideways scrolling, and scores green on Lighthouse.
 
-1. **Avatar upload.** Pick an image, see a preview, and upload it to a public
-   `avatars` bucket. Wrong types and files over 1 MB are refused politely,
-   in the page. A storage policy keeps every user inside their own folder.
-2. **Error boundaries.** The nav, profile photo, stats and habit list each sit
-   in their own `ErrorBoundary`. If one crashes, only that section is replaced
-   by its fallback card with a **Try again** button. The rest of the page keeps
-   working.
+It builds on the earlier steps:
+[Auth + RLS](https://github.com/panharithhh/supabase-habit-tracker) (email
+sign-in, one user's rows only) and
+[avatar uploads + error boundaries](https://github.com/panharithhh/supabase-habit-tracker-avatars).
 
-It builds on the [Auth + RLS habit tracker](https://github.com/panharithhh/supabase-habit-tracker):
-email sign-in, and RLS so each user only ever sees their own habits.
+**Live (HTTPS):** <https://panharithhh.github.io/supabase-habit-tracker-pwa/>
 
 ## Run it
 
 ```bash
 npm install
-cp .env.example .env    # then fill in the two values (see setup below)
-npm run dev             # http://localhost:5173
-npm run test:rls        # 29 tests: policies, storage policy, file checks. No Supabase project needed
-npm run build           # tsc -b && vite build
+cp .env.example .env    # the Supabase URL and publishable key (see below)
+npm run dev             # http://localhost:5173, no service worker in dev
+npm run build           # tsc -b && vite build, generates sw.js + manifest
+npm run preview         # serve the production build, service worker included
+npm run test:rls        # 29 policy and validation tests, no Supabase project needed
 ```
 
-## One-time Supabase setup
+A service worker only runs from `localhost` or HTTPS, so test install and
+offline with `npm run preview`, not `npm run dev`.
 
-1. **Create a project** at <https://supabase.com/dashboard> → New project.
-2. **Run the SQL.** SQL Editor → New query → paste all of
-   [`supabase/schema.sql`](supabase/schema.sql) → Run. Then do the same with
-   [`supabase/avatars.sql`](supabase/avatars.sql). This creates the `profiles`
-   table, the `avatars` bucket and its storage policy.
-3. **Make test accounts easy.** Authentication → Sign In / Providers → Email →
-   turn **Confirm email** off.
-4. **Copy the keys.** Project Settings → API Keys. Put the Project URL and the
-   **publishable** key into `.env`. Never the secret / `service_role` key: it
-   bypasses every policy, and Vite ships every `VITE_` variable to the browser.
+**Supabase setup** (once): create a project, run
+[`supabase/schema.sql`](supabase/schema.sql) then
+[`supabase/avatars.sql`](supabase/avatars.sql) in the SQL editor, turn off
+*Confirm email* for easy test accounts, and put the Project URL and the
+**publishable** key into `.env`. Never the secret / `service_role` key.
 
-## Avatar upload
+**Deploy:** [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)
+builds on every push to `main` and publishes to GitHub Pages. It reads
+`VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` from repository
+variables and sets `BASE_PATH=/<repo>/`, which the manifest scope, start URL
+and service worker all follow.
 
-The flow in [`AvatarUpload.tsx`](src/components/AvatarUpload.tsx) and
-[`useProfile.ts`](src/lib/useProfile.ts):
+## 1. Manifest, icons, install
 
-1. **Pick a file.** The `accept` attribute filters the file picker, but anyone
-   can switch it to "All files", so it isn't relied on.
-2. **Validate it** with [`validateAvatar`](src/lib/avatar.ts). The file must be
-   PNG, JPEG, WebP or GIF, and at most 1 MB (1,048,576 bytes). A rejected file
-   gets an inline message naming the file and the problem, for example
-   *“earth-wallpaper.png” is 5.8 MB. Choose an image of 1 MB or less.* SVG
-   (it can carry scripts) and HEIC (most browsers can't show it) aren't allowed.
-3. **Preview it.** `URL.createObjectURL(file)` shows the image before anything
-   is uploaded, with a dashed ring and a *Preview* badge. The blob URL is
-   revoked when the file changes or the card unmounts. If the file says it's
-   an image but can't be decoded, the preview's `onError` rejects it too.
-4. **Upload** to `avatars/<user id>/avatar` with `upsert: true`, so a new photo
-   replaces the old one.
-5. **Save** the public URL to `profiles.avatar_url`. The path never changes,
-   so a `?v=<timestamp>` is added to get past cached copies of the old image.
-6. **Render on mount.** On every page load, `useProfile` reads `avatar_url`
-   from the database and the nav and profile card show it. If the image fails
-   to load, they fall back to the email's first letter.
+[`vite.config.ts`](vite.config.ts) configures `vite-plugin-pwa`:
 
-### Where the rules are enforced
+- **Manifest:** name *Habit Tracker*, short name *Habits*, theme color
+  `#2f7d4f`, background `#f6f5f2`, `display: standalone`, `id`/`scope`/
+  `start_url` set to the base path, and two manifest screenshots (wide and
+  narrow) so Chrome can show its richer install sheet.
+- **Icons**, all rendered from one SVG by
+  [`scripts/generate-icons.mjs`](scripts/generate-icons.mjs) (`sharp`):
+  `purpose: any` at 48, 64, 72, 96, 128, 144, 152, 192, 256, 384 and 512 px;
+  `maskable` at 192 and 512 px with the mark inside the 80 % safe zone;
+  `apple-touch-icon-180x180.png` for iOS; `favicon.ico` (16 + 32) and
+  `favicon.svg` for tabs.
+- **Install prompt:** [`InstallPrompt`](src/components/InstallPrompt.tsx)
+  catches `beforeinstallprompt` (kept from page load, because the browser fires
+  it once, early), and once you're signed in shows an *Install Habit Tracker*
+  card. **Install** opens the browser's own install dialog; **Not now** stays
+  quiet for 14 days.
+- `index.html` gained a meta description, `theme-color`, favicons, the Apple
+  touch icon, and `viewport-fit=cover`, so the side padding can respect the
+  notch when the app runs full screen.
 
-| Rule | In the browser (UX) | On Supabase (security) |
+### Update toast
+
+`registerType: "prompt"`: a new build installs in the background and **waits**.
+[`UpdateToast`](src/components/UpdateToast.tsx) uses `useRegisterSW` and shows
+**New version available** with **Refresh** (calls `updateServiceWorker(true)`,
+which activates the new worker and reloads) and **Later**. An installed app
+can stay open for days, so it also checks for a new build every hour. On first
+install it shows *Ready to work offline* for a few seconds.
+
+## 2. Caching strategy
+
+| Asset | Strategy | Why it earns it |
 |---|---|---|
-| Images only | `validateAvatar` checks `file.type` | bucket `allowed_mime_types`: png, jpeg, webp, gif |
-| At most 1 MB | `validateAvatar` checks `file.size` | bucket `file_size_limit`: 1048576 |
-| Only your own folder | the app always uses `<your id>/avatar` | storage policy: `(storage.foldername(name))[1] = auth.uid()::text` |
-| Only your own `avatar_url` | the app sends your id | `profiles` RLS: `auth.uid() = id` |
+| App shell: `index.html`, JS, CSS, manifest, icons, favicons | **Precache** (install time, cache first, revisioned) | They change only when a new build ships, and the precache manifest carries a hash for each, so serving them straight from the cache is instant and offline-safe while `Refresh` swaps the whole set at once. |
+| Avatars (`…/storage/v1/object/public/avatars/…`) | **CacheFirst**, 20 entries, 30 days, opaque responses allowed | Every upload gets a new `?v=` URL, so a cached avatar can never be stale and there is no reason to ask the network for it again. |
+| Supabase API reads (`GET …/rest/v1/…`) | **NetworkFirst**, 4 s timeout, 30 entries, 7 days | Habits must be fresh when online, but a slow or missing connection should still show the last list rather than a spinner, so it falls back to the cached copy after 4 seconds or when offline. |
+| Writes (`POST`/`PATCH`/`DELETE`) and `/auth/v1` | **Network only** (no rule) | A write that "succeeds" from a cache would be a lie, and tokens must never be cached; new habits are queued by the app instead (below). |
 
-The storage policy, from [`supabase/avatars.sql`](supabase/avatars.sql):
+Two details that matter:
 
-```sql
-create policy "Users manage avatars in their own folder"
-  on storage.objects
-  for all
-  to authenticated
-  using (
-    bucket_id = 'avatars'
-    and (storage.foldername(name))[1] = (select auth.uid()::text)
-  )
-  with check (
-    bucket_id = 'avatars'
-    and (storage.foldername(name))[1] = (select auth.uid()::text)
-  );
-```
+- **Anchored patterns.** Workbox only matches a cross-origin request if the
+  pattern matches from the start of the URL, so the rules are built from
+  `VITE_SUPABASE_URL` (`^https://<ref>.supabase.co/rest/v1/`). A plain
+  `/\/rest\/v1\//` silently never matched: the offline test caught it.
+- **Per-user data in a shared cache.** The API cache is keyed by URL, not by
+  token, so `signOut()` deletes it. The next person to sign in on the device
+  never sees the previous user's habits offline.
 
-`for all` matters: `upload` needs INSERT, but `upsert: true` also needs SELECT
-and UPDATE. The bucket is **public**, which only means anyone with the URL can
-*view* a file (as `<img src>` needs). Every write still has to pass the policy,
-and nobody can list another user's folder.
+## 3. Offline banner and the offline queue
 
-## Error boundaries
+- [`useOnline`](src/lib/useOnline.ts) wraps `navigator.onLine` in
+  `useSyncExternalStore`, subscribed to the `online` and `offline` events.
+  [`OfflineBanner`](src/components/OfflineBanner.tsx) shows *You're offline.
+  Showing what's saved on this device…* and, on the `online` event, *Back
+  online. Syncing anything you added offline.* for a few seconds.
+- **Adding a habit offline** ([`useHabits`](src/lib/useHabits.ts),
+  [`offlineQueue`](src/lib/offlineQueue.ts)): the habit gets its final id from
+  `crypto.randomUUID()` and goes into a per-user queue in `localStorage`. It
+  shows at once with a dashed border and a **Queued · syncs when you're
+  online** pill, and survives a reload or a closed tab. The same happens if
+  the connection drops mid-request.
+- **Sync on reconnect:** the `online` event (and every app start) sends the
+  queue oldest first. Because each habit already has its id, a retry after a
+  half-finished sync hits the primary key (`23505`) and is treated as done, so
+  nothing is ever added twice. A habit the server refuses is dropped with a
+  message saying why.
+- Check-ins need the server (they log against a saved habit), so the day
+  buttons are disabled while offline, with a tooltip saying so.
+- **Signed in on a train:** an access token older than an hour can't be
+  refreshed offline, and supabase-js then reports no session.
+  [`useSession`](src/lib/useSession.ts) keeps the saved session while offline,
+  so the app still opens; supabase-js refreshes it when the network returns.
 
-[`ErrorBoundary`](src/components/ErrorBoundary.tsx) is a reusable class
-component (`getDerivedStateFromError` + `componentDidCatch`). It takes a
-`fallback` render function that receives `{ error, reset }`, and an optional
-`onReset`. [`App.tsx`](src/App.tsx) wraps each section in its own boundary with
-its own fallback copy:
+## 4. Mobile-first pass
 
-| Section | Fallback says | Extra |
+Checked at DevTools' device sizes, iPhone SE (375 × 667) → Pixel 5
+(393 × 851) → iPad Mini (768 × 1024), plus 320 px and desktop:
+
+| | Before | After |
 |---|---|---|
-| Nav | The top bar didn't load | a **Sign out** button, so you're never stuck |
-| Profile photo | Profile photo is unavailable | "Nothing was uploaded" |
-| Stats | Stats couldn't be shown | "Your habits below are safe" |
-| Habit list | Your habit list hit a problem | "Every check-in is saved" |
+| Page wider than the screen | no | no, at every size (`scrollWidth − clientWidth = 0`) |
+| Text overflowing its box | the **TODAY** label spilled out of its day button at 375 px (38 > 36 px) and 320 px (34 > 29 px) | none: every day shows its short weekday, today is marked by color and its accessible name |
+| Habit cards | one 600 px column at every size | `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` |
+| Top bar on a phone | wrapped onto two rows | one row: the avatar stands in for the email below `sm` (`hidden sm:inline`) |
 
-Every fallback has **Try again**, which re-renders the section. A last-resort
-boundary in [`main.tsx`](src/main.tsx) wraps the whole app. The habit and
-profile data live in hooks *above* the boundaries, so a crash and a retry never
-lose what the other sections are showing.
+Styles are mobile first: phone sizes are the defaults and `min-width` queries
+add to them. Tailwind v4 is loaded as **theme + utilities only** (no preflight),
+in a cascade layer, so it adds the grid/breakpoint classes without disturbing
+the hand-written CSS. Other fixes: `min-width: 0` on the add-habit input (a flex
+item won't shrink below ~20 characters otherwise), toasts full width on phones
+and a corner card from `sm` up, and `env(safe-area-inset-*)` padding.
 
-Boundaries only catch errors thrown while rendering. Errors in event handlers
-and async code, like a failed upload, are caught where they happen and shown
-inline.
+**Share** ([`ShareButton`](src/components/ShareButton.tsx)) opens the phone's
+share sheet with `navigator.share`. Where there isn't one (most desktop
+browsers), it copies the link with `navigator.clipboard.writeText` and says
+*Link copied*; if the clipboard is blocked too, it shows the link to copy by
+hand. Closing the share sheet (`AbortError`) is not treated as a failure.
 
-**See it yourself:** in `npm run dev`, open
-`http://localhost:5173/?crash=stats` (or `nav`, `profile`, `habits`, or several
-comma-separated). That section throws on purpose. **Try again** clears the
-switch, so the retry works. The switch is behind `import.meta.env.DEV`, so
-production builds don't contain it.
+## 5. Lighthouse
 
-## Tests
+Lighthouse 13.5 on the production build (`vite preview`), headless Brave,
+default mobile and desktop presets, signed-out entry page. Before and after
+were run back to back, twice; both runs gave identical scores.
 
-`npm run test:rls` runs three files, with no Supabase project needed:
+| | Performance | Accessibility | Best Practices | SEO |
+|---|---|---|---|---|
+| Mobile, before | 99 | 100 | 96 | 82 |
+| Mobile, after | **99** | **100** | **100** | **100** |
+| Desktop, before | 100 | 100 | 96 | 82 |
+| Desktop, after | **100** | **100** | **100** | **100** |
 
-- [`scripts/avatars.test.mjs`](scripts/avatars.test.mjs) loads the real
-  `supabase/avatars.sql` into an in-memory Postgres ([PGlite](https://pglite.dev))
-  with stand-ins for Supabase's `auth` and `storage` schemas. As two users and
-  a signed-out visitor, it checks that you can upload and upsert only in your
-  own folder, can't overwrite, move, delete or list anyone else's files, can't
-  upload outside a folder or to another bucket, and can only set your own
-  `avatar_url`. If you remove the folder check from the policy, 5 of its 12
-  tests fail.
-- [`scripts/avatar-validation.test.mjs`](scripts/avatar-validation.test.mjs)
-  checks `validateAvatar`: exactly 1 MB passes, one byte more fails, and PDF,
-  text, SVG, HEIC and empty files are rejected.
-- [`scripts/rls.test.mjs`](scripts/rls.test.mjs) is the habits RLS suite from
-  the previous step.
+What the fixes were:
 
-The bucket's size and type limits are enforced by the Storage server, not
-Postgres, so PGlite can't test them. They are set on the live bucket
-(`file_size_limit`, `allowed_mime_types`) and apply to every upload, including
-one that skips the app entirely.
+- **Best Practices 96 → 100:** the console logged a 404 for `/favicon.ico`.
+  There is now a real favicon (and an SVG one).
+- **SEO 82 → 100:** added a meta description, and a real `robots.txt` (before,
+  the SPA fallback answered `/robots.txt` with `index.html`: "13 errors").
+- **Performance:** the first version showed the install card on the sign-in
+  page, which became the largest paint and caused a layout shift (mobile
+  98, CLS 0.027). It now appears only once you're signed in: back to 99, CLS 0.
 
-### Checked on the live project
+## Screenshots
 
-Signed in as a real user, these uploads went straight to the Storage API,
-skipping `validateAvatar`:
+In [`docs/screenshots/`](docs/screenshots/). The app screenshots use a demo
+account against a local stand-in for the Supabase API (so no real account or
+data is involved); DevTools is real Brave DevTools, driven in headless mode.
 
-| Direct upload | Supabase's answer |
-|---|---|
-| 5.6 MB PNG into your own folder | `The object exceeded the maximum allowed size` |
-| PDF into your own folder | `mime type application/pdf is not supported` |
-| PNG into another user's folder | `new row violates row-level security policy` |
-| PNG outside any folder | `new row violates row-level security policy` |
+- Install: [in-app card](docs/screenshots/20-install-card.png),
+  [DevTools → Manifest](docs/screenshots/21-devtools-manifest.png)
+- Offline: [page loaded offline](docs/screenshots/22-offline-page.png),
+  [DevTools Network, Offline, all from ServiceWorker](docs/screenshots/23-devtools-network-offline.png),
+  [DevTools Service workers, Offline ticked](docs/screenshots/24-devtools-sw-offline.png),
+  [habit queued](docs/screenshots/25-offline-queued.png),
+  [synced after reconnect](docs/screenshots/26-synced.png)
+- Update: [New version available](docs/screenshots/27-update-toast.png)
+- Layout: [iPhone SE](docs/screenshots/28-iphone-se.png),
+  [Pixel 5](docs/screenshots/29-pixel-5.png),
+  [iPad Mini](docs/screenshots/30-ipad-mini.png),
+  [desktop](docs/screenshots/31-desktop.png),
+  [share fallback](docs/screenshots/32-share-fallback.png)
+- Lighthouse: [mobile before](docs/screenshots/33-lighthouse-before-mobile.png),
+  [mobile after](docs/screenshots/34-lighthouse-after-mobile.png),
+  [desktop before](docs/screenshots/35-lighthouse-before-desktop.png),
+  [desktop after](docs/screenshots/36-lighthouse-after-desktop.png)
 
-After uploading two different photos through the app, the bucket holds one
-object, `<your id>/avatar`: `upsert: true` replaced the first photo instead of
-adding a second file.
+### How the offline flow was checked
 
-## Deliverables
-
-Screenshots are in [`docs/screenshots/`](docs/screenshots/).
-
-**Preview before upload:** the chosen file, its size, and "not uploaded yet".
-
-![Preview state](docs/screenshots/10-avatar-preview.png)
-
-**Rejected files:** too big, and not an image.
-
-![File over 1 MB rejected](docs/screenshots/11-avatar-rejected-too-big.png)
-![PDF rejected](docs/screenshots/12-avatar-rejected-wrong-type.png)
-
-**Avatar on a fresh load**, read back from `profiles.avatar_url`:
-
-![Avatar after reload](docs/screenshots/13-avatar-after-reload.png)
-
-**A boundary in action:** the stats section throws (`?crash=stats`). Only its
-card is replaced. The nav, profile and habit list keep working.
-
-![Stats boundary](docs/screenshots/14-boundary-stats.png)
-
-After **Try again**, the stats render normally:
-
-![Stats after retry](docs/screenshots/15-boundary-retry.png)
-
-**Why client-side validation is UX and the storage policy is the security:**
-
-> Client-side validation runs in a browser the user controls and can be
-> skipped with a single direct API call, so it only spares honest users a
-> wasted upload and gives them a clear message, while the storage policy and
-> bucket limits run on Supabase's servers for every request, whatever sent it,
-> so they are what actually keeps bad files and other people's folders safe.
+With DevTools open: load once online (the service worker installs and
+precaches), reload (now controlled; the API read lands in `supabase-api`),
+tick **Offline** in Application → Service workers, reload. The page, JS, CSS,
+manifest, icons and both API reads came from `(ServiceWorker)`; the network
+attempts Workbox made first failed, as they should. A habit added offline
+showed as queued and was still there after another offline reload. Unticking
+Offline fired `online`, the habit was POSTed once with its client id, and the
+queue emptied. Appending a byte to `sw.js` and calling
+`registration.update()` brought up **New version available**; **Refresh**
+reloaded onto the new worker.
 
 ## Project layout
 
 ```
-supabase/schema.sql               habits + habit_logs, grants, RLS
-supabase/avatars.sql              profiles, avatars bucket, storage policy
-scripts/*.test.mjs                policy and validation tests (npm run test:rls)
-src/lib/avatar.ts                 file rules: types, 1 MB, path, messages
-src/lib/useProfile.ts             load avatar_url on mount, upload + save
-src/lib/useHabits.ts              habit reads and writes, shared by list and stats
-src/lib/crashTest.ts              dev-only ?crash=<section> switch
-src/components/ErrorBoundary.tsx  reusable class boundary
-src/components/SectionFallback.tsx fallback card with Try again
-src/components/AvatarUpload.tsx   pick, validate, preview, upload
-src/components/Avatar.tsx         round avatar with a letter fallback
-src/components/Nav.tsx            top bar with avatar and sign out
-src/components/Stats.tsx          done today, last 7 days, best streak
-src/components/HabitList.tsx      add, check in, delete
+vite.config.ts                     PWA plugin: manifest, icons, precache, runtime caching
+scripts/generate-icons.mjs         every icon size from one SVG
+public/                            icons, favicons, robots.txt, manifest screenshots
+.github/workflows/deploy.yml       build + GitHub Pages
+src/components/UpdateToast.tsx     useRegisterSW: "New version available" + Refresh
+src/components/InstallPrompt.tsx   beforeinstallprompt → Install card
+src/components/OfflineBanner.tsx   online/offline banner
+src/components/ShareButton.tsx     Web Share, clipboard fallback
+src/lib/useOnline.ts               navigator.onLine as React state
+src/lib/offlineQueue.ts            per-user queue of habits added offline
+src/lib/useHabits.ts               reads, writes, queue and sync on reconnect
+src/lib/useSession.ts              keeps the saved session while offline
+src/lib/cacheNames.ts              runtime cache names, shared with the config
+supabase/*.sql                     tables, RLS, avatars bucket and storage policy
+scripts/*.test.mjs                 policy and validation tests (npm run test:rls)
 ```
